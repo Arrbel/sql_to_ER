@@ -3,6 +3,7 @@
  */
 
 import type {
+  ParseDiagnostic,
   ParseResult,
   ParsedColumn,
   ParsedForeignKey,
@@ -198,6 +199,9 @@ const extractTableComment = (suffix: string): string | undefined => {
 const parseIdentifierList = (text: string) =>
   splitTopLevelComma(text).map((col) => cleanIdentifier(col));
 
+const parseQualifiedIdentifierList = (text: string) =>
+  splitTopLevelComma(text).map((col) => qualifiedIdentifier(col));
+
 const parseColumnType = (rest: string) => {
   const match = rest.match(
     /\s+(?:CONSTRAINT|PRIMARY|REFERENCES|NOT|NULL|DEFAULT|UNIQUE|CHECK|COLLATE|GENERATED|COMMENT|AUTO_INCREMENT|IDENTITY)\b/i,
@@ -205,13 +209,153 @@ const parseColumnType = (rest: string) => {
   return (match ? rest.slice(0, match.index) : rest).trim();
 };
 
+const unescapeSqlString = (raw: string) => raw.replace(/''/g, "'");
+
+const buildFkLabel = (columns: string[]) => columns.join(", ");
+
+const isSingleColumnUnique = (columns: string[], table: ParsedTable) => {
+  if (columns.length !== 1) return false;
+  const column = columns[0];
+  const found = table.columns.find((c) => c.name === column);
+  return Boolean(
+    found?.isUnique || (table.primaryKeys.length === 1 && table.primaryKeys[0] === column),
+  );
+};
+
+const pushRelationship = (
+  relationships: ParsedRelationship[],
+  table: ParsedTable,
+  fk: ParsedForeignKey,
+) => {
+  const columns = parseIdentifierList(fk.column);
+  const fkCol = columns.length === 1 ? table.columns.find((c) => c.name === columns[0]) : undefined;
+  const fromCardinality: "1" | "N" = isSingleColumnUnique(columns, table) ? "1" : "N";
+  relationships.push({
+    from: table.name,
+    to: fk.referencedTable,
+    label: buildFkLabel(columns),
+    fromCardinality,
+    toCardinality: "1",
+    ...(fkCol?.comment ? { comment: fkCol.comment } : {}),
+  });
+};
+
+const parseForeignKeyConstraint = (
+  text: string,
+): { columns: string[]; referencedTable: string; referencedColumns: string[] } | null => {
+  const match = text.match(
+    new RegExp(
+      String.raw`(?:CONSTRAINT\s+${IDENT}\s+)?FOREIGN\s+KEY\s*\(([\s\S]*?)\)\s+REFERENCES\s+(${QUALIFIED_IDENT})\s*\(([\s\S]*?)\)`,
+      "i",
+    ),
+  );
+  if (!match) return null;
+  return {
+    columns: parseIdentifierList(match[1]),
+    referencedTable: qualifiedIdentifier(match[2]),
+    referencedColumns: parseIdentifierList(match[3]),
+  };
+};
+
 export const parseSQLTables = (sql: string): ParseResult => {
   const tables: ParsedTable[] = [];
   const relationships: ParsedRelationship[] = [];
+  const diagnostics: ParseDiagnostic[] = [];
   const cleanSql = normalizeBatchSeparators(stripSqlComments(sql)).trim();
+  const pendingForeignKeys: Array<{
+    tableName: string;
+    columns: string[];
+    referencedTable: string;
+    referencedColumns: string[];
+    statement: string;
+  }> = [];
+  const pendingTableComments: Array<{ tableName: string; comment: string; statement: string }> = [];
+  const pendingColumnComments: Array<{
+    tableName: string;
+    columnName: string;
+    comment: string;
+    statement: string;
+  }> = [];
+
+  if (!cleanSql) {
+    return {
+      tables,
+      relationships,
+      diagnostics: [
+        {
+          code: "empty-input",
+          severity: "warning",
+          message: "Input is empty or contains only comments.",
+        },
+      ],
+    };
+  }
 
   splitStatements(cleanSql).forEach((statement) => {
-    if (!/^\s*CREATE\s+(?:TEMP(?:ORARY)?\s+)?TABLE/i.test(statement)) return;
+    if (/^\s*ALTER\s+TABLE/i.test(statement)) {
+      const alterMatch = statement.match(
+        new RegExp(
+          String.raw`^\s*ALTER\s+TABLE\s+(?:ONLY\s+)?(${QUALIFIED_IDENT})\s+ADD\s+(?:CONSTRAINT\s+${IDENT}\s+)?FOREIGN\s+KEY\s*\(([\s\S]*?)\)\s+REFERENCES\s+(${QUALIFIED_IDENT})\s*\(([\s\S]*?)\)`,
+          "i",
+        ),
+      );
+      if (alterMatch) {
+        pendingForeignKeys.push({
+          tableName: qualifiedIdentifier(alterMatch[1]),
+          columns: parseIdentifierList(alterMatch[2]),
+          referencedTable: qualifiedIdentifier(alterMatch[3]),
+          referencedColumns: parseIdentifierList(alterMatch[4]),
+          statement,
+        });
+      } else {
+        diagnostics.push({
+          code: "malformed-alter-table",
+          severity: "warning",
+          message:
+            "ALTER TABLE statement was not recognized as a supported foreign key constraint.",
+          statement,
+        });
+      }
+      return;
+    }
+
+    const commentMatch = statement.match(
+      new RegExp(
+        String.raw`^\s*COMMENT\s+ON\s+(TABLE|COLUMN)\s+(${QUALIFIED_IDENT})\s+IS\s+'((?:[^'\\]|''|\\.)*)'`,
+        "i",
+      ),
+    );
+    if (commentMatch) {
+      const target = parseQualifiedIdentifierList(commentMatch[2])[0];
+      if (commentMatch[1].toUpperCase() === "TABLE") {
+        pendingTableComments.push({
+          tableName: target,
+          comment: unescapeSqlString(commentMatch[3]),
+          statement,
+        });
+      } else {
+        const parts = target.split(".");
+        const columnName = parts.pop() || "";
+        pendingColumnComments.push({
+          tableName: parts.join("."),
+          columnName,
+          comment: unescapeSqlString(commentMatch[3]),
+          statement,
+        });
+      }
+      return;
+    }
+
+    if (!/^\s*CREATE\s+(?:TEMP(?:ORARY)?\s+)?TABLE/i.test(statement)) {
+      diagnostics.push({
+        code: "unsupported-statement",
+        severity: "info",
+        message:
+          "Statement was skipped because it is not a supported table, foreign key, or comment statement.",
+        statement,
+      });
+      return;
+    }
 
     const tableNameMatch = statement.match(
       new RegExp(
@@ -219,7 +363,15 @@ export const parseSQLTables = (sql: string): ParseResult => {
         "i",
       ),
     );
-    if (!tableNameMatch) return;
+    if (!tableNameMatch) {
+      diagnostics.push({
+        code: "malformed-create-table",
+        severity: "warning",
+        message: "CREATE TABLE statement was skipped because the table name could not be parsed.",
+        statement,
+      });
+      return;
+    }
     const tableName = qualifiedIdentifier(tableNameMatch[1]);
 
     // PostgreSQL 分区子表（`PARTITION OF parent ...`）不是独立实体 —— 它的列、PK、
@@ -227,7 +379,15 @@ export const parseSQLTables = (sql: string): ParseResult => {
     if (/\bPARTITION\s+OF\b/i.test(statement)) return;
 
     const extracted = extractMainBody(statement);
-    if (!extracted) return;
+    if (!extracted) {
+      diagnostics.push({
+        code: "malformed-create-table",
+        severity: "warning",
+        message: "CREATE TABLE statement was skipped because its column body could not be parsed.",
+        statement,
+      });
+      return;
+    }
     const tableBody = extracted.body;
     const tableComment = extractTableComment(extracted.suffix);
 
@@ -247,18 +407,28 @@ export const parseSQLTables = (sql: string): ParseResult => {
         return;
       }
 
-      const fkMatch = trimmedPart.match(
+      const fkConstraint = parseForeignKeyConstraint(trimmedPart);
+      if (fkConstraint) {
+        foreignKeys.push({
+          column: buildFkLabel(fkConstraint.columns),
+          referencedTable: fkConstraint.referencedTable,
+          referencedColumn: buildFkLabel(fkConstraint.referencedColumns),
+        });
+        return;
+      }
+
+      const uniqueMatch = trimmedPart.match(
         new RegExp(
-          String.raw`^(?:CONSTRAINT\s+${IDENT}\s+)?FOREIGN\s+KEY\s*\(\s*(${IDENT})\s*\)\s+REFERENCES\s+(${QUALIFIED_IDENT})\s*\(\s*(${IDENT})\s*\)`,
+          String.raw`^(?:CONSTRAINT\s+${IDENT}\s+)?UNIQUE(?:\s+(?:KEY|INDEX)\s+${IDENT})?\s*\(([\s\S]*?)\)`,
           "i",
         ),
       );
-      if (fkMatch) {
-        foreignKeys.push({
-          column: cleanIdentifier(fkMatch[1]),
-          referencedTable: qualifiedIdentifier(fkMatch[2]),
-          referencedColumn: cleanIdentifier(fkMatch[3]),
-        });
+      if (uniqueMatch) {
+        const uniqueCols = parseIdentifierList(uniqueMatch[1]);
+        if (uniqueCols.length === 1) {
+          const found = columns.find((c) => c.name === uniqueCols[0]);
+          if (found) found.isUnique = true;
+        }
         return;
       }
 
@@ -310,24 +480,69 @@ export const parseSQLTables = (sql: string): ParseResult => {
       ...(tableComment ? { comment: tableComment } : {}),
     });
 
-    foreignKeys.forEach((fk) => {
-      // 默认多对一；若 FK 列在本表上是单列主键 / UNIQUE，推断为 1:1。
-      // SQL 没有 DBML 的 `-` / `<>` 写法，全部从约束推断。
-      const fkCol = columns.find((c) => c.name === fk.column);
-      const isOnlySinglePk = primaryKeys.length === 1 && primaryKeys[0] === fk.column;
-      const fromCardinality: "1" | "N" = fkCol?.isUnique || isOnlySinglePk ? "1" : "N";
-      relationships.push({
-        from: tableName,
-        to: fk.referencedTable,
-        label: fk.column,
-        fromCardinality,
-        toCardinality: "1",
-        // SQL 没有原生关系级注释，但用户的认知里"FK 注释 == 关系注释"是
-        // 自然的：用 FK 列上的 COMMENT 'xxx' 作为关系的注释来源。
-        ...(fkCol?.comment ? { comment: fkCol.comment } : {}),
-      });
-    });
+    foreignKeys.forEach((fk) => pushRelationship(relationships, tables[tables.length - 1], fk));
   });
 
-  return { tables, relationships };
+  const tableByName = new Map(tables.map((t) => [t.name, t]));
+
+  pendingTableComments.forEach(({ tableName, comment, statement }) => {
+    const table = tableByName.get(tableName);
+    if (table) table.comment = comment;
+    else
+      diagnostics.push({
+        code: "malformed-comment",
+        severity: "warning",
+        message: `COMMENT ON TABLE target was not found: ${tableName}.`,
+        statement,
+      });
+  });
+
+  pendingColumnComments.forEach(({ tableName, columnName, comment, statement }) => {
+    const table = tableByName.get(tableName);
+    const column = table?.columns.find((c) => c.name === columnName);
+    if (column) column.comment = comment;
+    else
+      diagnostics.push({
+        code: "malformed-comment",
+        severity: "warning",
+        message: `COMMENT ON COLUMN target was not found: ${tableName}.${columnName}.`,
+        statement,
+      });
+  });
+
+  pendingForeignKeys.forEach(
+    ({ tableName, columns, referencedTable, referencedColumns, statement }) => {
+      const table = tableByName.get(tableName);
+      if (!table) {
+        diagnostics.push({
+          code: "malformed-alter-table",
+          severity: "warning",
+          message: `ALTER TABLE foreign key target table was not found: ${tableName}.`,
+          statement,
+        });
+        return;
+      }
+      const fk: ParsedForeignKey = {
+        column: buildFkLabel(columns),
+        referencedTable,
+        referencedColumn: buildFkLabel(referencedColumns),
+      };
+      table.foreignKeys.push(fk);
+      pushRelationship(relationships, table, fk);
+    },
+  );
+
+  if (tables.length === 0) {
+    diagnostics.push({
+      code: "no-supported-table",
+      severity: "warning",
+      message: "No supported CREATE TABLE statements were found.",
+    });
+  }
+
+  return {
+    tables,
+    relationships,
+    ...(diagnostics.length ? { diagnostics } : {}),
+  };
 };

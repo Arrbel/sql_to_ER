@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { generateChenModelData, estimateAttributeHalfSize, getTextWidth } from "../builder";
+import { parseSQLTables } from "../parser/sql";
 import type { ParsedRelationship, ParsedTable } from "../types";
 
 const usersTable: ParsedTable = {
@@ -106,6 +107,25 @@ describe("generateChenModelData", () => {
     const attrs = data.nodes.filter((n) => n.nodeType === "attribute");
     expect(attrs[0].label).toBe("user id");
     expect(attrs[1].label).toBe("name");
+  });
+
+  it("uses PostgreSQL COMMENT ON metadata for entity and attribute labels", () => {
+    const parsed = parseSQLTables(`
+      CREATE TABLE app.users (
+        id BIGINT PRIMARY KEY,
+        email TEXT NOT NULL
+      );
+
+      COMMENT ON TABLE app.users IS '系统用户';
+      COMMENT ON COLUMN app.users.email IS '邮箱地址';
+    `);
+
+    const data = generateChenModelData(parsed.tables, parsed.relationships, true, "comment");
+    const entity = data.nodes.find((n) => n.nodeType === "entity")!;
+    const attrs = data.nodes.filter((n) => n.nodeType === "attribute");
+
+    expect(entity.label).toBe("系统用户");
+    expect(attrs.map((a) => a.label)).toEqual(["id", "邮箱地址"]);
   });
 });
 

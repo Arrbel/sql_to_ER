@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { I18N, type Language } from "../i18n";
 import { detectLang } from "../language";
-import { parseSQLTables } from "../parser/sql";
-import { parseDBML } from "../parser/dbml";
+import { buildParseDiagnosticMessage, parseInputText } from "../parser/input";
+import { NOTICE_AUTO_DISMISS_MS, buildErrorNotice, buildParseNotice } from "../notifications";
 import { generateChenModelData, patchRelationshipLinkPoints } from "../builder";
 import {
   applyInitialComponentPositions,
@@ -23,6 +23,7 @@ import { updateGraphStyles } from "../graph/updateGraphStyles";
 import { useSnapshotPersistence } from "./useSnapshotPersistence";
 import type { ERNodeModel, GraphLike, ParsedTable, SnapshotRecord } from "../types";
 import type { HistoryManager } from "../history";
+import type { AppNotice, NoticeDraft } from "../notifications";
 
 type Translation = (typeof I18N)[keyof typeof I18N];
 
@@ -52,7 +53,7 @@ export interface UseGraphResult {
   hideFields: boolean;
   forceOn: boolean;
   hasGraph: boolean;
-  error: string | null;
+  notice: AppNotice | null;
   loading: boolean;
   // mutators (combine setState + side effect when applicable)
   setInputText: (next: string) => void;
@@ -60,7 +61,7 @@ export interface UseGraphResult {
   setShowComment: (next: boolean) => void;
   setHideFields: (next: boolean) => void;
   setForceOn: (next: boolean) => void;
-  setError: (next: string | null) => void;
+  setNotice: (next: NoticeDraft | AppNotice | null) => void;
   // commands
   handleGenerate: (opts?: GenerateOptions) => void;
   handleForceAlign: () => void;
@@ -94,7 +95,7 @@ export function useGraph({ t, initialLang }: UseGraphOptions): UseGraphResult {
   const [showComment, setShowCommentState] = useState(false);
   const [hideFields, setHideFieldsState] = useState(false);
   const [forceOn, setForceOnState] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [notice, setNoticeState] = useState<AppNotice | null>(null);
   const [loading, setLoading] = useState(false);
   const [hasGraph, setHasGraph] = useState(false);
 
@@ -115,6 +116,24 @@ export function useGraph({ t, initialLang }: UseGraphOptions): UseGraphResult {
   const persistence = useSnapshotPersistence({ graphRef, containerRef });
   const { persistSnapshot, schedulePersist, cancelPendingPersist } = persistence;
 
+  const setNotice = (next: NoticeDraft | AppNotice | null) => {
+    if (!next) {
+      setNoticeState(null);
+      return;
+    }
+    setNoticeState({
+      ...next,
+      id: "id" in next ? next.id : Date.now(),
+    });
+  };
+
+  const buildCurrentParseNotice = (result: ReturnType<typeof parseInputText>, message: string) =>
+    buildParseNotice(result, message, {
+      emptyTitle: stateRef.current.t.noticeParseHint,
+      partialTitle: stateRef.current.t.noticePartialParse,
+      errorTitle: stateRef.current.t.errParse,
+    });
+
   // 公共关闭：智能布局 / 强制对齐 / 切换历史 / 显隐属性 / 重新生成
   // 都会让"持续力导向"复位为关闭。状态、ref、控制器三处同步。
   const disableForceIfOn = () => {
@@ -133,7 +152,7 @@ export function useGraph({ t, initialLang }: UseGraphOptions): UseGraphResult {
     const positionMap = genOpts.positionMap ?? null;
 
     try {
-      setError(null);
+      setNotice(null);
       setLoading(true);
       // 重新生成 / 历史恢复都会重建图，先把持续力导向开关复位关闭，避免
       // 旧 controller 的状态意外延续到新图。
@@ -141,7 +160,12 @@ export function useGraph({ t, initialLang }: UseGraphOptions): UseGraphResult {
 
       const trimmed = String(useInputText || "").trim();
       if (!trimmed) {
-        setError(cur.t.errEmpty);
+        setNotice({
+          kind: "warning",
+          title: cur.t.noticeParseHint,
+          message: cur.t.errEmpty,
+          autoDismissMs: NOTICE_AUTO_DISMISS_MS,
+        });
         setLoading(false);
         return;
       }
@@ -149,29 +173,40 @@ export function useGraph({ t, initialLang }: UseGraphOptions): UseGraphResult {
       // 解析放在保存旧图之前：解析失败时不应触发任何 IndexedDB 写入
       // （既不为新输入排程保存，也不为旧图落档），否则会把"用户随手清空 +
       // 粘错语法"的中间状态固化进历史。
-      let parsedData = parseSQLTables(trimmed);
-      if (parsedData.tables.length === 0) {
-        parsedData = parseDBML(trimmed);
-      }
+      const parsedData = parseInputText(trimmed);
       const { tables, relationships } = parsedData;
 
       if (tables.length === 0) {
-        // 无有效表：取消任何挂起的保存、清空画布并以遮罩形式呈现错误。
-        // 不写 IndexedDB；不更新 lastInputRef，否则后续的"旧图保存"会以损坏
-        // 的输入作 key 把上一次的有效图覆盖掉。
+        // 无有效表：取消任何挂起的保存，不写 IndexedDB；不更新 lastInputRef，
+        // 否则后续的"旧图保存"会以损坏的输入作 key 把上一次的有效图覆盖掉。
+        // 若已有有效图，保留它并只显示诊断，避免临时错误清空画布。
         cancelPendingPersist();
-        if (graphRef.current) {
+        if (graphRef.current && !parsedData.shouldPreservePreviousGraph) {
           graphRef.current.clear?.();
           graphRef.current.destroy?.();
           graphRef.current = null;
+          historyRef.current.reset();
+          tablesDataRef.current = null;
+          lastInputRef.current = "";
+          setHasGraph(false);
         }
-        historyRef.current.reset();
-        tablesDataRef.current = null;
-        lastInputRef.current = "";
-        setHasGraph(false);
-        setError(cur.t.errNoTable);
+        setNotice(
+          buildCurrentParseNotice(
+            parsedData,
+            buildParseDiagnosticMessage(parsedData, cur.t.errNoTable),
+          ),
+        );
         setLoading(false);
         return;
+      }
+
+      if (parsedData.diagnostics.length > 0) {
+        setNotice(
+          buildCurrentParseNotice(
+            parsedData,
+            buildParseDiagnosticMessage(parsedData, cur.t.errNoTable),
+          ),
+        );
       }
 
       // === 解析成功后，再把当前图作为旧 input 的快照存起来 ===
@@ -295,7 +330,7 @@ export function useGraph({ t, initialLang }: UseGraphOptions): UseGraphResult {
     } catch (e) {
       console.error("SQL Parsing error:", e);
       const msg = e instanceof Error ? e.message : String(e);
-      setError(`${cur.t.errParse}: ${msg}${cur.t.errParseHint}`);
+      setNotice(buildErrorNotice(`${cur.t.errParse}: ${msg}${cur.t.errParseHint}`, cur.t.errParse));
     } finally {
       setLoading(false);
     }
@@ -462,14 +497,14 @@ export function useGraph({ t, initialLang }: UseGraphOptions): UseGraphResult {
     hideFields,
     forceOn,
     hasGraph,
-    error,
+    notice,
     loading,
     setInputText,
     setIsColored,
     setShowComment,
     setHideFields,
     setForceOn,
-    setError,
+    setNotice,
     handleGenerate,
     handleForceAlign,
     handleArrangeLayout,
