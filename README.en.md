@@ -7,10 +7,10 @@
 [English](README.en.md) · **Simplified Chinese**
 
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg?style=flat-square)](./LICENSE)
-[![GitHub Stars](https://img.shields.io/github/stars/ystemsrx/sql_to_ER?style=flat-square&color=gold)](https://github.com/ystemsrx/sql_to_ER/stargazers)
-[![GitHub Forks](https://img.shields.io/github/forks/ystemsrx/sql_to_ER?style=flat-square&color=blue)](https://github.com/ystemsrx/sql_to_ER/network/members)
-[![GitHub Issues](https://img.shields.io/github/issues/ystemsrx/sql_to_ER?style=flat-square&color=red)](https://github.com/ystemsrx/sql_to_ER/issues)
-[![Last Commit](https://img.shields.io/github/last-commit/ystemsrx/sql_to_ER?style=flat-square&color=green)](https://github.com/ystemsrx/sql_to_ER/commits)
+[![GitHub Stars](https://img.shields.io/github/stars/Arrbel/sql_to_ER?style=flat-square&color=gold)](https://github.com/Arrbel/sql_to_ER/stargazers)
+[![GitHub Forks](https://img.shields.io/github/forks/Arrbel/sql_to_ER?style=flat-square&color=blue)](https://github.com/Arrbel/sql_to_ER/network/members)
+[![GitHub Issues](https://img.shields.io/github/issues/Arrbel/sql_to_ER?style=flat-square&color=red)](https://github.com/Arrbel/sql_to_ER/issues)
+[![Last Commit](https://img.shields.io/github/last-commit/Arrbel/sql_to_ER?style=flat-square&color=green)](https://github.com/Arrbel/sql_to_ER/commits)
 [![TypeScript](https://img.shields.io/badge/TypeScript-3178C6?style=flat-square&logo=typescript&logoColor=white)](#)
 [![React](https://img.shields.io/badge/React-19-61DAFB?style=flat-square&logo=react&logoColor=black)](#)
 [![Vite](https://img.shields.io/badge/Vite-8-646CFF?style=flat-square&logo=vite&logoColor=white)](#)
@@ -18,7 +18,7 @@
 [![Vitest](https://img.shields.io/badge/Vitest-4-6E9F18?style=flat-square&logo=vitest&logoColor=white)](#)
 [![pnpm](https://img.shields.io/badge/pnpm-F69220?style=flat-square&logo=pnpm&logoColor=white)](#)
 
-### 🌐 [**Try Online · Live Demo**](https://ystemsrx.github.io/sql_to_ER/sql2er.html)
+### 🌐 [**Try Online · Live Demo**](https://arrbel.github.io/sql_to_ER/sql2er.html)
 
 </div>
 
@@ -37,12 +37,15 @@ A **pure front-end** web tool for generating **Chen-model ER diagrams** from SQL
 
 The easiest way — just open the **online version**, no installation needed:
 
-🔗 **[ER Diagram Generator](https://ystemsrx.github.io/sql_to_ER/sql2er.html)**
+> [!NOTE]
+> This is a fork of [ystemsrx/sql_to_ER](https://github.com/ystemsrx/sql_to_ER), maintained by Arrbel. The original AGPL-3.0 license and upstream attribution are preserved.
+
+🔗 **[ER Diagram Generator](https://arrbel.github.io/sql_to_ER/sql2er.html)**
 
 Or run it locally for development. This project uses [pnpm](https://pnpm.io/) (the version is pinned via the `packageManager` field — `corepack enable` lets Corepack pick it up automatically):
 
 ```bash
-git clone https://github.com/ystemsrx/sql_to_ER.git
+git clone https://github.com/Arrbel/sql_to_ER.git
 cd sql_to_ER
 corepack enable        # one-time, enables Corepack to manage the pnpm version
 pnpm install
@@ -175,12 +178,12 @@ Every time you generate an ER diagram, a **snapshot** (thumbnail + node position
 
 - **Open** — click the **🕘 clock icon** in the top-left of the canvas to open the history page.
 - **Browse** — **drag** the cards or use the **scroll wheel** on the panel; the most recent snapshot sits in front.
-- **Restore** — drag any card to snap it to the center; clicking *Restore* then rebuilds the diagram with the saved node positions / labels (no re-layout).
+- **Restore** — drag any card to snap it to the center; clicking _Restore_ then rebuilds the diagram with the saved node positions / labels (no re-layout).
 - **Delete** — the **🗑** button on each card removes just that snapshot.
 - **Persistence** — everything lives in your browser's **IndexedDB** (entries appear only after you generate a non-sample diagram).
 
 > [!TIP]
-> Need to undo your last manual tweak? *Restore* swaps to a different archived input; for fine-grained step-by-step undo / redo use **Ctrl + Z / Ctrl + Y**.
+> Need to undo your last manual tweak? _Restore_ swaps to a different archived input; for fine-grained step-by-step undo / redo use **Ctrl + Z / Ctrl + Y**.
 
 ---
 
