@@ -3,10 +3,7 @@ import { I18N, type Language } from "../i18n";
 import { detectLang } from "../language";
 import { parseSQLTables } from "../parser/sql";
 import { parseDBML } from "../parser/dbml";
-import {
-  generateChenModelData,
-  patchRelationshipLinkPoints,
-} from "../builder";
+import { generateChenModelData, patchRelationshipLinkPoints } from "../builder";
 import {
   applyInitialComponentPositions,
   arrangeLayout,
@@ -18,21 +15,13 @@ import { setupNodeDoubleClickEdit } from "../editor";
 import { createManager as createHistoryManager } from "../history";
 import * as Snapshots from "../snapshots";
 import * as AttributeLayout from "../attributeLayout";
-import {
-  createERGraph,
-  buildDefaultLayoutCfg,
-} from "../graph/createERGraph";
+import { createERGraph, buildDefaultLayoutCfg } from "../graph/createERGraph";
 import { attachEntityDragSync } from "../graph/attachEntityDragSync";
 import { attachForceLoop } from "../graph/forceLoop";
 import type { ForceLoopController } from "../graph/forceLoop";
 import { updateGraphStyles } from "../graph/updateGraphStyles";
 import { useSnapshotPersistence } from "./useSnapshotPersistence";
-import type {
-  ERNodeModel,
-  GraphLike,
-  ParsedTable,
-  SnapshotRecord,
-} from "../types";
+import type { ERNodeModel, GraphLike, ParsedTable, SnapshotRecord } from "../types";
 import type { HistoryManager } from "../history";
 
 type Translation = (typeof I18N)[keyof typeof I18N];
@@ -223,12 +212,7 @@ export function useGraph({ t, initialLang }: UseGraphOptions): UseGraphResult {
           }
         });
       } else {
-        applyInitialComponentPositions(
-          nodes,
-          edges,
-          containerRef.current,
-          0,
-        );
+        applyInitialComponentPositions(nodes, edges, containerRef.current, 0);
       }
 
       // Clear previous graph completely
@@ -302,11 +286,7 @@ export function useGraph({ t, initialLang }: UseGraphOptions): UseGraphResult {
       setupNodeDoubleClickEdit(graph as any, container, {
         onBeforeChange: () => historyRef.current.record(graph),
       });
-      attachEntityDragSync(
-        graph as any,
-        historyRef.current,
-        () => forceOnRef.current,
-      );
+      attachEntityDragSync(graph as any, historyRef.current, () => forceOnRef.current);
 
       // 持续力导向控制器：拖动期间根据斥力 + 连边引力重排其它节点
       const forceCtrl = attachForceLoop(graph as any);
@@ -325,15 +305,10 @@ export function useGraph({ t, initialLang }: UseGraphOptions): UseGraphResult {
   const hideAttributesInGraph = () => {
     historyRef.current.reset();
     AttributeLayout.hideAttributes(
-      graphRef.current as unknown as Parameters<
-        typeof AttributeLayout.hideAttributes
-      >[0],
+      graphRef.current as unknown as Parameters<typeof AttributeLayout.hideAttributes>[0],
     );
   };
-  const showAttributesInGraph = (
-    showComment: boolean,
-    isColored: boolean,
-  ) => {
+  const showAttributesInGraph = (showComment: boolean, isColored: boolean) => {
     historyRef.current.reset();
     AttributeLayout.showAttributes({
       graph: graphRef.current as unknown as AttributeLayout.ShowAttributesOptions["graph"],
@@ -372,9 +347,7 @@ export function useGraph({ t, initialLang }: UseGraphOptions): UseGraphResult {
       const nameLabel = m.nameLabel;
       const commentLabel = m.commentLabel;
       if (nameLabel === undefined && commentLabel === undefined) return;
-      const target = next
-        ? commentLabel || nameLabel || m.label
-        : nameLabel || m.label;
+      const target = next ? commentLabel || nameLabel || m.label : nameLabel || m.label;
       if (target !== undefined && target !== m.label) {
         graph.updateItem(node, { label: target });
       }
@@ -412,10 +385,7 @@ export function useGraph({ t, initialLang }: UseGraphOptions): UseGraphResult {
     setShowCommentState(!!snap.showComment);
     setHideFieldsState(!!snap.hideFields);
 
-    const positionMap = new Map<
-      string,
-      { x?: number; y?: number; label?: string }
-    >();
+    const positionMap = new Map<string, { x?: number; y?: number; label?: string }>();
     snap.nodes.forEach((n) => {
       positionMap.set(n.id, { x: n.x, y: n.y, label: n.label });
     });

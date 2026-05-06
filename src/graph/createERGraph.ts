@@ -14,10 +14,7 @@ export interface CreateERGraphOptions {
  *
  * 拆出来是为了把 useGraph 里 ~100 行 G6 配置常量隔离开。
  */
-export function createERGraph({
-  container,
-  layoutCfg,
-}: CreateERGraphOptions): GraphLike {
+export function createERGraph({ container, layoutCfg }: CreateERGraphOptions): GraphLike {
   // G6.Graph 接收一份扁平的 cfg；shouldBegin 等回调里的 e 在 G6 4.x 没有公开类型。
   const graph = new (G6 as any).Graph({
     container,
