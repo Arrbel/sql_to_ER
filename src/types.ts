@@ -43,6 +43,24 @@ export interface ParsedRelationship {
 export interface ParseResult {
   tables: ParsedTable[];
   relationships: ParsedRelationship[];
+  diagnostics?: ParseDiagnostic[];
+}
+
+export type ParseDiagnosticSeverity = "info" | "warning" | "error";
+
+export type ParseDiagnosticCode =
+  | "empty-input"
+  | "no-supported-table"
+  | "unsupported-statement"
+  | "malformed-create-table"
+  | "malformed-alter-table"
+  | "malformed-comment";
+
+export interface ParseDiagnostic {
+  code: ParseDiagnosticCode;
+  severity: ParseDiagnosticSeverity;
+  message: string;
+  statement?: string;
 }
 
 export interface ShapeStyle {

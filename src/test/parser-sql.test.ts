@@ -126,11 +126,18 @@ describe("parseSQLTables", () => {
   });
 
   it("returns an empty result for blank input", () => {
-    expect(parseSQLTables("")).toEqual({ tables: [], relationships: [] });
-    expect(parseSQLTables("   \n  -- only comments\n")).toEqual({
+    expect(parseSQLTables("")).toEqual({
       tables: [],
       relationships: [],
+      diagnostics: [
+        {
+          code: "empty-input",
+          severity: "warning",
+          message: "Input is empty or contains only comments.",
+        },
+      ],
     });
+    expect(parseSQLTables("   \n  -- only comments\n").diagnostics?.[0]?.code).toBe("empty-input");
   });
 
   it("ignores UNIQUE / KEY / INDEX clauses but keeps regular columns", () => {
@@ -324,6 +331,143 @@ describe("parseSQLTables", () => {
         fromCardinality: "1",
         toCardinality: "1",
       },
+    ]);
+  });
+
+  it("parses ALTER TABLE foreign keys declared after CREATE TABLE", () => {
+    const result = parseSQLTables(`
+      CREATE TABLE app.users (
+        id BIGINT PRIMARY KEY
+      );
+
+      CREATE TABLE app.posts (
+        id BIGINT PRIMARY KEY,
+        author_id BIGINT NOT NULL
+      );
+
+      ALTER TABLE app.posts
+        ADD CONSTRAINT fk_posts_author
+        FOREIGN KEY (author_id)
+        REFERENCES app.users (id);
+    `);
+
+    expect(result.relationships).toEqual([
+      {
+        from: "app.posts",
+        to: "app.users",
+        label: "author_id",
+        fromCardinality: "N",
+        toCardinality: "1",
+      },
+    ]);
+    expect(result.tables[1].foreignKeys).toEqual([
+      {
+        column: "author_id",
+        referencedTable: "app.users",
+        referencedColumn: "id",
+      },
+    ]);
+  });
+
+  it("applies PostgreSQL COMMENT ON TABLE and COMMENT ON COLUMN", () => {
+    const result = parseSQLTables(`
+      CREATE TABLE app.users (
+        id BIGINT PRIMARY KEY,
+        email TEXT NOT NULL
+      );
+
+      COMMENT ON TABLE app.users IS '系统用户';
+      COMMENT ON COLUMN app.users.email IS '邮箱地址';
+    `);
+
+    expect(result.tables[0].comment).toBe("系统用户");
+    expect(result.tables[0].columns.find((c) => c.name === "email")?.comment).toBe("邮箱地址");
+  });
+
+  it("parses composite foreign keys from CREATE TABLE and ALTER TABLE constraints", () => {
+    const result = parseSQLTables(`
+      CREATE TABLE app.orders (
+        order_id BIGINT NOT NULL,
+        region_id BIGINT NOT NULL,
+        PRIMARY KEY (order_id, region_id)
+      );
+
+      CREATE TABLE app.shipments (
+        order_id BIGINT NOT NULL,
+        region_id BIGINT NOT NULL,
+        tracking_no TEXT NOT NULL,
+        CONSTRAINT fk_shipments_order_inline
+          FOREIGN KEY (order_id, region_id)
+          REFERENCES app.orders (order_id, region_id)
+      );
+
+      CREATE TABLE app.invoices (
+        order_id BIGINT NOT NULL,
+        region_id BIGINT NOT NULL
+      );
+
+      ALTER TABLE app.invoices
+        ADD CONSTRAINT fk_invoices_order
+        FOREIGN KEY (order_id, region_id)
+        REFERENCES app.orders (order_id, region_id);
+    `);
+
+    expect(result.relationships).toEqual([
+      {
+        from: "app.shipments",
+        to: "app.orders",
+        label: "order_id, region_id",
+        fromCardinality: "N",
+        toCardinality: "1",
+      },
+      {
+        from: "app.invoices",
+        to: "app.orders",
+        label: "order_id, region_id",
+        fromCardinality: "N",
+        toCardinality: "1",
+      },
+    ]);
+  });
+
+  it("infers 1:1 for ALTER TABLE foreign keys on unique columns", () => {
+    const result = parseSQLTables(`
+      CREATE TABLE users (
+        id BIGINT PRIMARY KEY
+      );
+
+      CREATE TABLE user_profiles (
+        id BIGINT PRIMARY KEY,
+        user_id BIGINT NOT NULL,
+        CONSTRAINT uq_user_profiles_user UNIQUE (user_id)
+      );
+
+      ALTER TABLE user_profiles
+        ADD FOREIGN KEY (user_id)
+        REFERENCES users (id);
+    `);
+
+    expect(result.relationships).toEqual([
+      {
+        from: "user_profiles",
+        to: "users",
+        label: "user_id",
+        fromCardinality: "1",
+        toCardinality: "1",
+      },
+    ]);
+  });
+
+  it("returns diagnostics for skipped unsupported SQL statements", () => {
+    const result = parseSQLTables(`
+      CREATE INDEX idx_users_email ON users (email);
+    `);
+
+    expect(result.tables).toEqual([]);
+    expect(result.relationships).toEqual([]);
+    expect(result.diagnostics?.map((d) => d.code)).toEqual([
+      "unsupported-statement",
+      "no-supported-table",
     ]);
   });
 });

@@ -23,6 +23,7 @@ import { useExportButton } from "./hooks/useExportButton";
 import type { ExportFormat, ExportDoneCallback } from "./hooks/useExportButton";
 import { useUndoRedoShortcuts } from "./hooks/useUndoRedoShortcuts";
 import { useWheelZoomRotate } from "./hooks/useWheelZoomRotate";
+import { buildErrorNotice } from "./notifications";
 
 registerCustomNodes(G6);
 
@@ -46,9 +47,9 @@ const App = () => {
     hideFields,
     forceOn,
     hasGraph,
-    error,
+    notice,
     loading,
-    setError,
+    setNotice,
     setInputText,
     setIsColored,
     setShowComment,
@@ -91,7 +92,7 @@ const App = () => {
       graphRef,
       hasGraph,
       containerRef,
-      onError: setError,
+      onError: (message) => setNotice(buildErrorNotice(message, t.noticeOperationFailed)),
       onDone,
       patchRelationshipLinkPoints,
       G6,
@@ -107,7 +108,7 @@ const App = () => {
       graphRef,
       hasGraph,
       containerRef,
-      onError: setError,
+      onError: (message) => setNotice(buildErrorNotice(message, t.noticeOperationFailed)),
       onDone,
       patchRelationshipLinkPoints,
       G6,
@@ -122,7 +123,7 @@ const App = () => {
     Exporter.exportDrawio({
       graphRef,
       hasGraph,
-      onError: setError,
+      onError: (message) => setNotice(buildErrorNotice(message, t.noticeOperationFailed)),
       onDone,
       patchRelationshipLinkPoints,
     });
@@ -143,10 +144,22 @@ const App = () => {
     onExportBtnClick,
     onExportBtnKey,
     toExportIdle,
-  } = useExportButton({ hasGraph, runExport, onError: setError });
+  } = useExportButton({
+    hasGraph,
+    runExport,
+    onError: (message) => setNotice(buildErrorNotice(message, t.noticeOperationFailed)),
+  });
 
   useUndoRedoShortcuts({ graphRef, historyRef });
   useWheelZoomRotate({ containerRef, graphRef, historyRef });
+
+  useEffect(() => {
+    if (!notice || notice.autoDismissMs === null) return;
+    const timer = window.setTimeout(() => {
+      setNotice(null);
+    }, notice.autoDismissMs);
+    return () => window.clearTimeout(timer);
+  }, [notice, setNotice]);
 
   // 切换背景显示
   const handleToggleBackground = () => {
@@ -253,6 +266,27 @@ const App = () => {
 
   return (
     <>
+      {notice && (
+        <div className="notice-region" aria-live="polite" aria-atomic="true">
+          <div className={`notice-toast notice-toast--${notice.kind}`} role="status">
+            <div className="notice-icon" aria-hidden="true">
+              {notice.kind === "error" ? "!" : "i"}
+            </div>
+            <div className="notice-copy">
+              <div className="notice-title">{notice.title}</div>
+              <div className="notice-message">{notice.message}</div>
+            </div>
+            <button
+              type="button"
+              className="notice-close"
+              onClick={() => setNotice(null)}
+              aria-label={lang === "zh" ? "关闭通知" : "Dismiss notification"}
+            >
+              ×
+            </button>
+          </div>
+        </div>
+      )}
       <div className="main-content">
         <div className="input-section">
           <div className="card">
@@ -594,11 +628,6 @@ const App = () => {
                 {loading && (
                   <div className="loading-overlay">
                     <div className="spinner"></div>
-                  </div>
-                )}
-                {error && (
-                  <div className="diagram-error-overlay">
-                    <div className="error-message">⚠️ {error}</div>
                   </div>
                 )}
                 <div

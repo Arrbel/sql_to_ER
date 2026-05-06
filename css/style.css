@@ -623,7 +623,7 @@ body::before {
 }
 
 /* ═══════════════════════════════════════
-   加载与错误
+   加载与通知
 ═══════════════════════════════════════ */
 .loading-overlay {
   position: absolute;
@@ -645,34 +645,118 @@ body::before {
   animation: spin 1s var(--ease-gentle) infinite;
 }
 
-.error-message {
-  background: rgba(192, 69, 58, 0.08);
-  color: var(--color-error);
-  padding: 14px 18px;
-  border-radius: var(--radius-md);
-  border: 1px solid rgba(192, 69, 58, 0.22);
-  font-size: 0.95rem;
-  display: flex;
-  align-items: center;
-  gap: 10px;
+.notice-region {
+  position: fixed;
+  top: 24px;
+  right: 24px;
+  z-index: 10000;
+  pointer-events: none;
+  width: min(420px, calc(100vw - 48px));
 }
 
-/* 解析失败时遮在画布上方的提示。loading-overlay 比它优先级高（z-index 10） */
-.diagram-error-overlay {
-  position: absolute;
-  inset: 0;
+.notice-toast {
+  pointer-events: auto;
+  display: grid;
+  grid-template-columns: 32px 1fr 28px;
+  gap: 12px;
+  align-items: start;
+  padding: 14px 14px 14px 16px;
+  border: 1px solid var(--app-border);
+  border-radius: var(--radius-md);
+  background: var(--app-bg-overlay);
+  color: var(--app-ink);
+  box-shadow:
+    0 16px 36px rgba(20, 20, 19, 0.16),
+    0 2px 8px rgba(20, 20, 19, 0.08);
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
+  animation: noticeIn 260ms var(--ease-default);
+}
+
+.notice-toast--warning {
+  border-color: color-mix(in srgb, var(--color-warning) 42%, var(--app-border));
+}
+
+.notice-toast--error {
+  border-color: color-mix(in srgb, var(--color-error) 46%, var(--app-border));
+}
+
+.notice-icon {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
   display: grid;
   place-items: center;
-  padding: 24px;
-  z-index: 8;
-  pointer-events: none;
+  font-size: 14px;
+  font-weight: var(--weight-bold);
+  line-height: 1;
 }
 
-.diagram-error-overlay .error-message {
-  pointer-events: auto;
-  max-width: min(520px, 90%);
-  background: var(--app-bg-overlay);
-  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.08);
+.notice-toast--warning .notice-icon {
+  background: color-mix(in srgb, var(--color-warning) 14%, transparent);
+  color: var(--color-warning);
+}
+
+.notice-toast--error .notice-icon {
+  background: color-mix(in srgb, var(--color-error) 12%, transparent);
+  color: var(--color-error);
+}
+
+.notice-copy {
+  min-width: 0;
+}
+
+.notice-title {
+  font-family: var(--app-font);
+  font-size: 0.9rem;
+  font-weight: var(--weight-semibold);
+  line-height: 1.35;
+  color: var(--app-ink);
+}
+
+.notice-message {
+  margin-top: 4px;
+  font-family: var(--app-font);
+  font-size: 0.82rem;
+  line-height: 1.55;
+  color: var(--app-ink-2);
+  overflow-wrap: anywhere;
+}
+
+.notice-close {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  color: var(--app-ink-3);
+  cursor: pointer;
+  font-size: 18px;
+  line-height: 1;
+  transition:
+    background var(--duration-fast) var(--ease-default),
+    color var(--duration-fast) var(--ease-default),
+    transform var(--duration-fast) var(--ease-default);
+}
+
+.notice-close:hover {
+  background: color-mix(in srgb, var(--app-ink) 8%, transparent);
+  color: var(--app-ink);
+}
+
+.notice-close:active {
+  transform: scale(0.94);
+}
+
+@keyframes noticeIn {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 /* ═══════════════════════════════════════
@@ -944,6 +1028,14 @@ body::before {
 }
 
 @media (max-width: 768px) {
+  .notice-region {
+    top: 14px;
+    left: 50%;
+    right: auto;
+    transform: translateX(-50%);
+    width: min(440px, calc(100vw - 28px));
+  }
+
   .btn-primary:hover,
   .btn-secondary:hover,
   .btn-accent:hover {
@@ -1606,6 +1698,7 @@ body.is-lang-fading .lang-fade-target {
 .attrs-toggle:focus-visible,
 .history-toggle:focus-visible,
 .force-toggle:focus-visible,
+.notice-close:focus-visible,
 .github-corner:focus-visible {
   outline: 2px solid var(--app-accent);
   outline-offset: 3px;
